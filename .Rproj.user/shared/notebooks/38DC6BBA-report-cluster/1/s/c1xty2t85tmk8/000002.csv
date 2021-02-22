@@ -1,0 +1,1 @@
+"0","fviz_nbclust(data_demean, kmeans, method = ""wss"")"

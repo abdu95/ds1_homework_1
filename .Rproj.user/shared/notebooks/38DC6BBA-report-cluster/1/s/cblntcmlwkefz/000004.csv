@@ -1,0 +1,5 @@
+"0",""
+"0","pre_process <- preProcess(data, method = c(""center"", ""scale"", ""pca""), thresh = 0.999)"
+"0","pre_process$rotation %>%"
+"0","  kable(digits = 3) %>%"
+"0","  kable_styling(full_width = F)"

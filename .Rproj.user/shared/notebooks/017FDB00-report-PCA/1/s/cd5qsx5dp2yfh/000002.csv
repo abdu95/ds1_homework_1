@@ -1,0 +1,4 @@
+"0","summary(model_differences$statistics$RMSE$`lasso.diff.elastic net`$statistic) %>%"
+"0","  tidy() %>%"
+"0","  kable(digits = 3) %>%"
+"0","  kable_styling(full_width = F)"

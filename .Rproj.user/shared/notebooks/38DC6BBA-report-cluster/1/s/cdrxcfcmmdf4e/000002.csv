@@ -1,0 +1,5 @@
+"0","# de-mean the data for easier visualizations and comparisons"
+"0","data_demean <- mutate(data, across(everything(), ~ .x - mean(.x)))"
+"0","# scale the data to avoid overweighting variables with large values (for example ""assault"" VS ""murder"")"
+"0","# data_demean_scaled <-  mutate(data_demean, across(everything(), ~ .x / sd(.x)))"
+"0",""

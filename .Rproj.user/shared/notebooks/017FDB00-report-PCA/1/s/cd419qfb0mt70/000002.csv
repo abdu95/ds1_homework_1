@@ -1,0 +1,7 @@
+"0",""
+"0","selected_variables <- c(""LotArea"", ""NumFloors"", ""BldgArea"",  ""ResArea"")"
+"0","ggplot("
+"0","  data = ridge_coeffs %>% filter(variable %in% selected_variables),"
+"0","  aes(x = log(lambda), y = value)) +"
+"0","    geom_line() +"
+"0","  facet_wrap(~ variable, scales = ""free_y"", ncol = 1)"

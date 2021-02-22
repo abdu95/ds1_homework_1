@@ -1,0 +1,16 @@
+"0","set.seed(1234)"
+"0","lasso_model_cv <- cv.glmnet("
+"0","  x = x_train, y = data_train[[""logTotalValue""]], "
+"0","  family = ""gaussian"","
+"0","  alpha = 1,"
+"0","  nfolds = 10"
+"0",")"
+"0",""
+"0","best_lambda <- lasso_model_cv$lambda.min"
+"0","message(paste0(""The optimally chosen penalty parameter: "", best_lambda))"
+"2","The optimally chosen penalty parameter: 0.00410920636723713
+"
+"0","highest_good_enough_lambda <- lasso_model_cv$lambda.1se"
+"0","message(paste0(""The highest good enough penalty parameter: "", highest_good_enough_lambda))"
+"2","The highest good enough penalty parameter: 0.0289896385220566
+"

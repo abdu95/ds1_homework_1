@@ -1,0 +1,1 @@
+"0","ggpairs(data, columns = c(""logTotalValue"", ""BuiltFAR"", ""NumFloors"", ""ResArea"", ""BldgArea"", ""LotArea""), upper = list(continuous = wrap(""cor"", size = 4)))"

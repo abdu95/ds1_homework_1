@@ -1,0 +1,4 @@
+"0","data <- USArrests"
+"0","print(skim(data))"
+"2","Error in skim(data) : could not find function ""skim""
+"

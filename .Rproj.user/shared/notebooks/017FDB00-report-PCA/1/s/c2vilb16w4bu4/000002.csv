@@ -1,0 +1,4 @@
+"0",""
+"0","tail(pcr_fit$results)%>%"
+"0","  kable(digits = 3) %>%"
+"0","  kable_styling(full_width = F)"

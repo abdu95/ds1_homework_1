@@ -1,0 +1,3 @@
+"0",""
+"0","pca_result <- prcomp(genes, scale = TRUE)"
+"0",""

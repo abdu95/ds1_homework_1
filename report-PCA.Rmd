@@ -1,0 +1,707 @@
+---
+title: "Homework 1: Supervised learning with penalized models and PCA"
+subtitle: "Data Science 1: Machine Learning Concepts - CEU 2021"
+author: "Abduvosid Malikov"
+output: bookdown::html_document2
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In this problem I am going to analyze a dataset about property values in Manhattan. The goal will be to predict the logarithm of the property value: logTotalValue.
+
+## EDA 
+
+*Task a: Do a short exploration of data and find possible predictors of the target variable.*
+
+
+Dataset contains 31740 observations. There are 17 factor variables, 29 numeric variables and 1 logical variable. Next steps focuses on a short exploration of data and finding possible predictors of the target variable.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# install.packages("pls")
+library(tidyverse)
+library(GGally)   # ggplot extensions
+library(caret)
+library(magrittr)
+library(skimr)
+library(janitor)  # for data cleaning purposes
+library(glmnet)   # the main package for penalized linear models
+library(broom)    # for tidying regression coefficient outputs
+library(knitr)
+library(kableExtra)  # for nicer tables in rmarkdown
+require(scales)
+library(skimr)
+library(pls)
+
+theme_set(theme_bw())   # globally set ggplot theme
+```
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+data <- readRDS(url('http://www.jaredlander.com/data/manhattan_Train.rds')) %>%
+  mutate(logTotalValue = log(TotalValue)) %>%
+  drop_na()
+
+# skim(data)
+
+```
+
+We look at the outcome variable, the total value of houses. It is skewed to the right. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+ggplot(data = data, aes(x = TotalValue)) +
+  geom_histogram() + 
+  labs(x = "Total Value") + 
+  scale_x_continuous(labels = comma)
+
+```
+
+
+Total Value varies between 1080 to 19991700. 
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+summary(data$TotalValue) %>%
+  tidy() %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = F)
+```
+
+logTotalValue is closer to normal distribution.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+ggplot(data = data, aes(x = logTotalValue)) +
+  geom_histogram() + 
+  labs(x = "Total Value") + 
+  scale_x_continuous(labels = comma)
+
+
+```
+
+Let's see correlations of features and the outcome variable. Based on this,
+simple benchmark models can quickly be put together.
+Stronger the correlations are, the better chances we have that variables have more predictive poower in a linear model.
+We can see visual representation of correlation matrix. 
+The stronger is the shade of red color - the stronger is the correlation between variables (the closer is their correlation to 1).  
+```{r, echo=FALSE, message=FALSE, warning=FALSE }
+ggcorr(data,  hjust = 0.85, size = 3, color = "grey50")
+```
+
+
+From the matrix we can see that logTotalValue has strong positive correlation with the following variables: BuiltFAR (BUILT FLOOR AREA RATIO), NumFloors (NUMBER OF FLOORS), ResArea (RESIDENTIAL FLOOR AREA), BldgArea (BUILDING FLOOR AREA), LotArea (LOT AREA).
+
+
+In this plot, we can see the distribution of these 5 features. These predictor variables are correlated with each other as well. Also, we can see the scatterplot that shows what type of relationship there is between the variables. For example, we can see that the houses with the higher BUILT FLOOR AREA RATIO has higher logTotalValue (row 2, column 1). Another example is that the higher the BUILT FLOOR AREA RATIO of the house, the higher the NUMBER OF FLOORS, which can be seen from correlation of 0.73 (row 2, column 3).  
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE }
+ggpairs(data, columns = c("logTotalValue", "BuiltFAR", "NumFloors", "ResArea", "BldgArea", "LotArea"), upper = list(continuous = wrap("cor", size = 4)))
+```
+
+## A baseline model: OLS
+
+Now we can look at the baseline linear model that selects 2 of the variables that are more strongly correlated with logTotalValue. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE }
+
+ # lm(logTotalValue ~ LotArea + NumFloors, data = data) %>% 
+ #   tidy() %>% 
+ #   kable(digits = 3) %>% 
+ #   kable_styling(full_width = F)
+
+lm(logTotalValue ~ BuiltFAR + NumFloors, data = data) %>% 
+  tidy() %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE }
+
+lm(logTotalValue ~ BuiltFAR + BldgArea, data = data) %>%
+  tidy() %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = F)
+```
+
+Based on coefficient estimates, weird pattern: logTotalValue does not change when BUILT FLOOR AREA RATIO and Building Area changes. This is spurious and is caused by the high positive correlation between the feature variables. This makes model estimates have a large variance. Our goal is to get a model with more stable out of sample predictive performance, this is problematic for the prediction. Univariate regressions have the intuitive signs:
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE }
+lm(logTotalValue ~ BuiltFAR, data = data) %>% 
+  tidy() %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+
+```
+
+Based on this coefficient estimate, we can say that the house with one unit higher BUILT FLOOR AREA RATIO has 25 % higher total value. 
+
+Penalized methods offer a solution to these kinds of patterns.
+
+### Set up training and test (holdout) datasets
+
+*Task b: Create a training and a test set*
+
+
+
+We use 70% of data for training set (22223 observations) and the rest of the data (30%) will be used for the final model evaluation (test set - 9523 observations). I am going to use 10 fold cross validation to estimate the model. 
+
+
+```{r, include = FALSE, message=FALSE, warning=FALSE }
+
+set.seed(1234)
+training_ratio <- 0.7
+train_indices <- createDataPartition( 
+  y = data[["logTotalValue"]],
+  times = 1,
+  p = training_ratio,
+  list = FALSE
+) %>% as.vector()
+data_train <- data[train_indices, ]
+data_test <- data[-train_indices, ]
+
+fit_control <- trainControl(method = "cv", number = 10)
+```
+
+
+### Estimate Linear Model 
+
+*Task c: Use a linear regression to predict logTotalValue and use 10-fold cross validation to assess the predictive power*
+
+
+The formula for linear model that I selected looks in the following way:
+
+*logTotalValue = BuiltFAR + BldgArea + LotArea + NumFloors*
+
+
+```{r, include = FALSE, message=FALSE, warning=FALSE }
+
+set.seed(857)
+
+model1 <- as.formula(logTotalValue ~ BuiltFAR + BldgArea + LotArea + NumFloors)
+linear_fit <- train(
+  model1,
+  method = "lm",
+  preProcess = c("center", "scale"),
+  data = data_train,
+  trControl = fit_control
+)
+linear_fit$results  %>% 
+  tidy() %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+
+
+```
+
+RMSE of the model in the training set is equal to 1.23. 
+
+
+```{r, include = FALSE, message=FALSE, warning=FALSE}
+set.seed(857)
+
+model1 <- as.formula(logTotalValue ~ BuiltFAR + BldgArea + LotArea + NumFloors)
+linear_fit_demo <- train(
+  model1,
+  method = "lm",
+  preProcess = c("center", "scale"),
+  data = data_test,
+  trControl = fit_control
+)
+
+# linear_fit_demo
+```
+
+RMSE of the model in the test set is equal to 1.19. Since RMSE of the model in the training and test sets are similar, we can conclude that the model has sufficient predictive performance. 
+
+
+Now I want to use penalized linear models for the same task by trying LASSO, Ridge and Elastic Net models. I want to ensure whether the best model improve on the simple linear model
+
+## Penalized methods 
+
+*Task d: Use penalized linear models for the same task. Make sure to try LASSO, Ridge and Elastic Net models. Does the best model improve on the simple linear model?*
+
+### Penalize large coefficients: the Ridge regression
+
+The ridge regression adds a penalty term to the sum of squared residuals: the sum of squares
+of the regression coefficients. This puts a cost on having large coefficients. Result: biased but lower variance model.
+
+For the features, all the columns will be used (except logTotalValue and TotalValue).
+
+```{r, include = FALSE, message=FALSE, warning=FALSE}
+
+features <- setdiff(names(data), c("logTotalValue", "TotalValue", "ID"))
+```
+
+In this plot, we can see log of lambda and coefficients. Each line (color) represents one variable. Lambda shows how much we want the coefficients of the model to be shrunk to zero (how large the penalty is). The larger the coefficients, the more influence the variable has on the output. 
+
+First we are going to directly work with the `glmnet` package to estimate 
+penalized models. Then we look at how this can be implemented through `caret`.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# glmnet needs inputs as a matrix. model.matrix: handles factor variables
+# -1: we do not need the intercept as glmnet will automatically include it
+x_train <- model.matrix( ~ . -1, data_train[, features, with = FALSE])
+# dim(x_train)
+
+# standardization of variables is automatically done by glmnet
+
+# how much penalty do we want to apply? select with CV
+lambda_grid <- 10^seq(2,-5,length=100)  
+
+set.seed(1234)
+ridge_model <- glmnet(
+  x = x_train, y = data_train[["logTotalValue"]], 
+  family = "gaussian", # for continuous response
+  alpha = 0  # the ridge model
+)
+
+plot(ridge_model, xvar = "lambda")
+```
+
+
+
+Look at some individual coefficients.
+We can see for each lambda value, what was the coefficient. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+# helper function to extract the coefficient sequence as a data.table
+get_glmnet_coeff_sequence <- function(glmnet_model) {
+  coeff_sequence <- coef(glmnet_model) %>% tidy()
+  names(coeff_sequence) <- c("variable", "lambda_id", "value")
+
+  lambdas <- tibble(
+    lambda = glmnet_model$lambda, 
+    lambda_id = paste0("s", 0:(length(glmnet_model$lambda) - 1))
+  )
+  
+  dplyr::inner_join(coeff_sequence, lambdas, by = "lambda_id") 
+}
+```
+
+
+
+```{r, include = FALSE, message=FALSE, warning=FALSE}
+
+ridge_coeffs <- get_glmnet_coeff_sequence(ridge_model)
+```
+
+
+
+In this plot we can see the coefficient path of the selected variables as we apply more and more penalties. The paths of these coefficients is not monotonic. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+selected_variables <- c("LotArea", "NumFloors", "BldgArea",  "ResArea")
+ggplot(
+  data = ridge_coeffs %>% filter(variable %in% selected_variables),
+  aes(x = log(lambda), y = value)) +
+    geom_line() +
+  facet_wrap(~ variable, scales = "free_y", ncol = 1)
+```
+
+
+
+
+We can use cross-validation to determine the optimal penalty term weight. We want to identify which lambda value is resulting to the best out of sample predictive performance. 
+ Two lambda values marked on the plot: one with the minimal CV RMSE, the other is the simplest model (highest lambda) which contains the optimal lambda's error within one standard deviation. That is, it gives the simplest model that is still "good enough".
+
+
+The best lambda is the one with smallest MSE. It is equal to 0.119
+The lambda value of a simplest model (which is close enough to the best model) is equal to 0.440.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+set.seed(1234)
+ridge_model_cv <- cv.glmnet(
+  x = x_train, y = data_train[["logTotalValue"]], 
+  family = "gaussian",
+  alpha = 0,
+  nfolds = 10
+)
+
+best_lambda <- ridge_model_cv$lambda.min
+message(paste0("The optimally chosen penalty parameter: ", best_lambda))
+
+highest_good_enough_lambda <- ridge_model_cv$lambda.1se
+message(paste0("The highest good enough penalty parameter: ", highest_good_enough_lambda))
+```
+This plot shows lambda value on x axis and MSE on y axis, showing what is the MSE of each lambda value. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+plot(ridge_model_cv)
+```
+
+We can also use `caret` to estimate ridge models. This lets us compare it later to any
+other model estimated with caret, using, for example, cross-validation with exactly the
+same folds.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+# ridge model
+ridge_tune_grid <- expand.grid(
+  "alpha" = c(0),
+  "lambda" = seq(0.05, 0.5, by = 0.025)
+)
+
+set.seed(857)
+ridge_fit <- train(
+  logTotalValue ~ . -TotalValue,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale"),
+  tuneGrid = ridge_tune_grid,
+  trControl = fit_control
+)
+```
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+ggplot(ridge_fit)
+```
+
+We can see that both caret and glmnet suggest almost the same best lambda parameter value. 
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+ridge_fit$results %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+
+```
+
+With the best lambda (identified with cross validation) for Ridge model, RMSE substantially decreases (0.722) compared to the RMSE of the  linear model (1.23). 
+
+
+### LASSO regression
+
+While Ridge applies a constraint on the sum of squares of coefficients, LASSO does the same for the sum of the __absolute values__ of coefficients.
+
+This seemingly small difference has important consequences: some coefficients are set exactly to zero, others are only shrunk towards zero. 
+
+In this plot, we can see how many variables there are for the certain lambda. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+set.seed(1234)
+
+lasso_model <- glmnet(
+  x = x_train, y = data_train[["logTotalValue"]], 
+  family = "gaussian",
+  alpha = 1  # the lasso model
+)
+
+plot(lasso_model, xvar = "lambda")
+```
+One more time, we can apply cross-validation to determine the optimal value for the penalty term.
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+set.seed(1234)
+lasso_model_cv <- cv.glmnet(
+  x = x_train, y = data_train[["logTotalValue"]], 
+  family = "gaussian",
+  alpha = 1,
+  nfolds = 10
+)
+
+best_lambda <- lasso_model_cv$lambda.min
+message(paste0("The optimally chosen penalty parameter: ", best_lambda))
+
+highest_good_enough_lambda <- lasso_model_cv$lambda.1se
+message(paste0("The highest good enough penalty parameter: ", highest_good_enough_lambda))
+```
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+plot(lasso_model_cv)
+```
+
+
+
+Now I fit LASSO models with `caret` which is similar to that of Ridge.
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+tenpowers <- 10^seq(-1, -5, by = -1)
+
+lasso_tune_grid <- expand.grid(
+  "alpha" = c(1),
+  "lambda" = c(tenpowers, tenpowers / 2) 
+)
+
+set.seed(857)
+lasso_fit <- train(
+  logTotalValue ~ . -TotalValue,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale"),
+  tuneGrid = lasso_tune_grid,
+  trControl = fit_control
+)
+```
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+lasso_fit$results %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+```
+
+
+
+
+
+With the best lambda (identifies with cross validation) for LASSO, RMSE substantially decreases (0.722) compared to the RMSE of the  linear model (1.23). However RMSE of LASSO is the same with RMSE of Ridge model. 
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+tenpowers <- 10^seq(-1, -5, by = -1)
+
+lasso_tune_grid <- expand.grid(
+  "alpha" = c(1),
+  "lambda" = c(tenpowers, tenpowers / 2) 
+)
+
+set.seed(857)
+lasso_fit_oneSE <- train(
+  logTotalValue ~ . -TotalValue,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale"),
+  tuneGrid = lasso_tune_grid,
+  selectionFunction = "oneSE",
+  trControl = fit_control
+)
+
+```
+
+*Task e: Which of the models you’ve trained is the “simplest one that is still good enough”? (Hint: explore adding selectionFunction = "oneSE" to the trainControl in caret’s train. What is its effect?)*
+
+
+Also, among the models I’ve trained, I wanted to identify  the “simplest one that is still good enough”. I changed the default "best" parameter of trainControl to 1 Standard Error ("oneSE"). There wasn't any difference in RMSE and R squared of the model. 
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+lasso_fit_oneSE$results %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+```
+
+
+
+### Combine Ridge and LASSO: Elastic net
+
+We can combine both types of penalties. LASSO is attractive since it performs principled variable selection. However, when having correlated features, typically only one of them - quite arbitrarily - is kept in the model. Ridge simultaneously shrinks coefficients of these towards zero. If we apply penalties of both the absolute values and the squares of the coefficients, both virtues are retained. This method is called Elastic net.
+
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+enet_tune_grid <- expand.grid(
+  "alpha" = seq(0, 1, by = 0.1),
+  "lambda" = union(lasso_tune_grid[["lambda"]], ridge_tune_grid[["lambda"]])
+)
+
+set.seed(857)
+enet_fit <- train(
+  logTotalValue ~ . -TotalValue,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale"),
+  tuneGrid = enet_tune_grid,
+  trControl = fit_control
+)
+```
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+enet_fit$results %>% 
+  tidy() %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+```
+
+RMSE of the Elastic Net model is equal to 0.793 which is higher than the other penalized models, LASSO and Ridge. 
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+ggplot(enet_fit) + scale_x_log10()
+```
+
+
+
+## PCA 
+
+*Task f: Now try to improve the linear model by using PCA for dimensionality reduction. Center and scale your variables and use pcr to conduct a search for the optimal number of principal components. Does PCA improve the fit over the simple linear model? (Hint: there are many factor variables. Make sure to include large number of principal components such as 60 - 90 to your search as well.)*
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+tune_grid <- data.frame(ncomp = 60:90)
+set.seed(857)
+
+ols_fit <- train(
+  logTotalValue ~ . ,
+  data = data_train,
+  method = "pcr",
+  trControl = trainControl(method = "cv", number = 10),
+  tuneGrid = tune_grid,
+  preProcess = c("center", "scale")
+)
+
+tail(ols_fit$results) %>% 
+  kable(digits = 3) %>% 
+  kable_styling(full_width = F)
+
+```
+
+
+The final number of components used for the model was ncomp = 87. The RMSE is equal to 0.680. This RMSE is lower than the all above mentioned models - penalized models and OLS. It means PCA improved the fit of the simple linear model. 
+
+
+*Task g: If you apply PCA prior to estimating penalized models via preProcess, does it help to achieve a better fit? (Hint: also include "nzv" to preProcess to drop zero variance features). What is your intuition why this can be the case?*
+
+
+
+Here I use method = "nzv" that identifies numeric predictor columns with a single value (i.e. having near zero variance) and excludes them from further calculations. So, method = "nzv" excludes "near zero-variance" predictors. 
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+
+set.seed(857)
+ridge_pca <- train(
+  logTotalValue ~ .,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale", "nzv", "pca"),
+  tuneGrid = ridge_tune_grid,
+  trControl = trainControl(method = "cv", number = 10))
+
+
+set.seed(857)
+lasso_pca <- train(
+  logTotalValue ~ .,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale", "nzv", "pca"),
+  tuneGrid = lasso_tune_grid,
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+set.seed(857)
+enet_pca <- train(
+  logTotalValue ~ .,
+  data = data_train,
+  method = "glmnet",
+  preProcess = c("center", "scale", "nzv", "pca"),
+  tuneGrid = enet_tune_grid,
+  trControl = trainControl(method = "cv", number = 10)
+)
+```
+
+
+
+Results for the models using PCA are shown below:   
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+# PCA CV RMSE dataframe with number of components
+cv_pca_rmse_df <-
+  data.frame('Model' = c('OLS with PCA', 'Ridge with PCA',
+                         'LASSO with PCA', 'Elastic Net with PCA'), 
+             'RMSE' = c(min(ols_fit$results$RMSE), min(ridge_pca$results$RMSE),
+             min(lasso_pca$results$RMSE), min(enet_pca$results$RMSE)),
+             'Number.of.components' = c(ols_fit$bestTune$ncomp, ridge_pca$preProcess$numComp, lasso_pca$preProcess$numComp, enet_pca$preProcess$numComp))
+
+# show the CV RMSE for models with PCA DF
+cv_pca_rmse_df %>% 
+  kable(digits = 3) %>% 
+  kable_styling()
+``` 
+
+PCA helps to achieve a better fit as RMSE is now lower for the penalized models. My intuition towards this phenomenon is based on 3 concepts: penalized models, PCA and variance. 
+
+*Variance: *
+
+Variance is about how much you overfit the data. 
+
+*Penalized models: *
+
+LASSO, Ridge and Elastic Net penalize complex models to avoid overfitting of the data by the model. These three types of penalized models shrink the coefficients (either absolute value of coefficient or their sum of squares) of variables towards zero. Earlier, we have seen that the paths of the coefficients shrinkage in penalized models is not monotonic. Largest coefficient value was not appearing for the smallest penalty. Because one of the variables which was deprecated may had high correlation with the second variable. Since the first variable came closer to zero, second variable became more significant. All of the variables play a part in the coefficient of other variables.  Penalized models are against overfitting the data, therefore they try to reduce the variance. 
+
+
+*PCA: *
+
+PCA reduces the dimensionality of the dataset, increasing interpretability but at the same time minimizing information loss. It does so by creating new uncorrelated variables that successively maximize variance.
+
+As we can see, penalized models decrease the variance while PCA increases the variance. By using PCA prior to estimating penalized models, we keep the virtue of the both approaches and therefore achieve lower RMSE - better predictive performance of the model. 
+
+
+
+## Evaluate all models
+
+*Task h: Select the best model of those you’ve trained. Evaluate your preferred model on the test set*
+
+
+Among all the models: OLS, LASSO,Elastic Net, and Ridge, LASSO and OLS has the lowest average RMSE. They both show almost similar RMSE, OLS showing slightly lower RMSE: 0.680.
+
+Minimum, average and maximum RMSE of OLS:
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+resample_profile <- resamples(
+  list("linear" = ols_fit,
+       "ridge" = ridge_fit,
+       "lasso" = lasso_fit,
+       "elastic net" = enet_fit
+  )
+) 
+
+# summary(resample_profile) 
+
+summary(resample_profile$values$`linear~RMSE`) %>%
+  tidy() %>% 
+  kable(digits = 3) %>%
+  kable_styling(full_width = F)
+
+```
+
+
+```{r, show = FALSE, message=FALSE, warning=FALSE}
+bwplot(resample_profile)
+```
+
+In a statistical sense, differences between the models are not large, with the exception of linear model having too high RMSE.  Also, linear model's variance is much larger than that of the penalized ones.
+
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+model_differences <- diff(resample_profile)
+```
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+summary(model_differences$statistics$RMSE$`lasso.diff.elastic net`$statistic) %>%
+  tidy() %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = F)
+```
+
+
+
+
+
+
+### Evaluate the chosen model on holdout set
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+
+some_RMSE <- RMSE(predict(ols_fit, newdata = data_test), data_test[["logTotalValue"]])
+
+```
+
+RMSE of the OLS model in holdout set is 0.825. This RMSE is higher than RMSE in training set (0.680). This indicates that model may perform worse than expected in live data. 
+
+This problem maybe caused by underfitting the data. It can be further investigated and solved by using another dataset and using more complex (and less interpretable) methods such as CART and Random Forest.
+
+
+

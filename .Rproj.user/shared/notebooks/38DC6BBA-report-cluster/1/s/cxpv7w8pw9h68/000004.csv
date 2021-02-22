@@ -1,0 +1,5 @@
+"0","ggplot(data = data, aes(x = Murder)) +"
+"0","  geom_histogram() + "
+"0","  labs(x = ""Murder"") + "
+"0","  scale_x_continuous(labels = comma)"
+"0",""

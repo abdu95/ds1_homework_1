@@ -1,0 +1,202 @@
+---
+title: "Homework 1: Clustering on the USArrests dataset"
+subtitle: "Data Science 1: Machine Learning Concepts - CEU 2021"
+author: "Abduvosid Malikov"
+output: bookdown::html_document2
+
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+library(skimr)
+library(janitor)
+
+library(factoextra) # provides nice functions for visualizing the output of PCA
+library(NbClust) # for choosing the optimal number of clusters
+
+library(knitr)
+library(kableExtra)
+library(scales) 
+library(broom)
+
+
+theme_set(theme_minimal())
+```
+
+### Introduction
+
+In this analysis I use the USArrests dataset. The task is to apply clustering then make sense of the clusters using the principal components.
+
+Dataset consists of 50 observations and 4 variables - "Murder"   "Assault"  "UrbanPop" "Rape".  
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+data <- USArrests
+
+```
+
+
+
+
+### Task a: 
+
+Think about any data pre-processing steps you may/should want to do before applying clustering methods. Are there any?*
+
+I perform Exploratory Data Analysis to find out the steps for pre-processing. 
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+ggplot(data = data, aes(x = Murder)) +
+  geom_histogram() + 
+  labs(x = "Murder") + 
+  scale_x_continuous(labels = comma)
+
+```
+
+
+Murder varies between 0.8 to 17.4.
+
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE}
+summary(data$Murder) %>%
+  tidy() %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = F)
+```
+
+
+
+There are no missing values, extreme values and errors in the data. 
+
+
+### An example with two variables
+
+First, I take two variables only to seek a linear combination of them that
+* has the highest possible variance
+* with weights that are normalized (their sum of squares are 1)
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+df_murder_assault <- select(data, Murder, Assault)
+ggplot(df_murder_assault, aes(Murder, Assault)) +
+  geom_point()
+```
+
+
+
+
+
+To prepare the data for clustering, we'll de-mean and scale it. (Basically, standardization.) This should make visualizing the data easier, and it will allow us to compare the variables easily on a common scale.  
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+# de-mean the data for easier visualizations and comparisons
+data_demean <- mutate(data, across(everything(), ~ .x - mean(.x)))
+# scale the data to avoid overweighting variables with large values (for example "assault" VS "murder")
+# data_demean_scaled <-  mutate(data_demean, across(everything(), ~ .x / sd(.x)))
+
+```
+
+
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+
+pre_process <- preProcess(data, method = c("center", "scale", "pca"), thresh = 0.999)
+pre_process$rotation %>%
+  kable(digits = 3) %>%
+  kable_styling(full_width = F)
+```
+
+
+
+
+### Task b:
+
+Determine the optimal number of clusters as indicated by NbClust heuristics*
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+fviz_nbclust(data_demean, kmeans, method = "wss")
+```
+
+
+For the standardized data, optimal number of clusters is 2, as indicated in the "elbow" point point of the plot. 
+
+Another option is `NbClust`. It calculates 30 indices based on various principles and chooses by
+majority rule.
+
+
+```{r, results="hide", echo=FALSE}
+
+nb <- NbClust(data_demean, method = "kmeans", min.nc = 2, max.nc = 10, index = "all")
+```
+
+
+
+The D index is a graphical method of determining the number of clusters. In the plot of D index, we seek a significant knee (the significant peak in Dindex second differences plot) that corresponds to a significant increase of the value of the measure. 
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+
+hist(nb$Best.nc[1,],breaks = 15)  
+
+```
+
+
+According to the majority rule the best number of clusters is  2. Also, from the above histogram, we can observe that out of all indices, most(10) voted for 2 clusters.
+
+
+### Task c: 
+
+Use the k-means method to cluster states using the number of clusters found in a) and anything else that you think that makes sense. Plot observations colored by clusters in the space of urban population and another (crime-related) variable. (See example code from class, use factor(km$cluster) to create a vector of class labels)
+
+
+k-means clustering is used to plot the observations and 2 clusters have distinct colors. Horizontal axis correspond to Assault (crime-related variable). Vertical axis shows Urban Population. 
+
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+set.seed(2002)
+km <- kmeans(data_demean, centers = 2) # number of clusters 2
+data_demean_clusters <- mutate(data_demean, cluster = factor(km$cluster))
+ggplot(data_demean_clusters, aes(x = Assault, y = UrbanPop, color = cluster)) +
+  geom_point()
+
+```  
+
+### Task d:
+
+Perform PCA and get the first two principal component coordinates for all observations 
+
+First two principal components were identified. The plot shows them together below. There appear to be two distinct groups. I have added a blue annotation line to mark them clearly.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE}
+# get principal components
+pca_result <- prcomp(data, scale = TRUE)
+
+# get just the first 2 PC's
+first_two_pc <- as_tibble(pca_result$x[, 1:2])
+# show PC1 and PC2 with annotation
+ggplot(first_two_pc, aes(x = PC1, y = PC2)) +
+  geom_point() 
+```  
+
+
+
+Plot clusters of your choice from the previous points in the coordinate system defined by the first two principal components. How do clusters relate to these?
+
+If we overlay the clusters we identified above (before PCA), we observe that two coordinates (Groups) overlap with each other. 
+
+```{r , echo = FALSE, warning=FALSE, message=FALSE}
+# PCs and clustered data shown together
+ggplot(first_two_pc, aes(x = PC1, y = PC2)) +
+  geom_point() +
+  geom_point(data = data_demean_clusters, aes(x = Assault, y = UrbanPop, color = cluster)) +
+  labs(x = "PC1 / Assault", y = "PC2 / UrbanPop")+
+  annotate("text", x = c(-2,1), y = c(2,2), label = c("Group A", "Group B"), color = "red", size = 5)
+```  
+

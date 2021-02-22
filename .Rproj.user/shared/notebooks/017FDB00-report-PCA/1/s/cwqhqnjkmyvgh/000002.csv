@@ -1,0 +1,3 @@
+"0",""
+"0","some_RMSE <- RMSE(predict(ols_fit, newdata = data_test), data_test[[""logTotalValue""]])"
+"0",""

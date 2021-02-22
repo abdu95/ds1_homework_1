@@ -1,0 +1,4 @@
+"0","lm(logTotalValue ~ BuiltFAR, data = data_train) %>% "
+"0","  tidy() %>% "
+"0","  kable(digits = 3) %>% "
+"0","  kable_styling(full_width = F)"
