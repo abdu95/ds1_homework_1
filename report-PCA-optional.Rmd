@@ -51,8 +51,30 @@ You can see a plot that visualizes data points using principal components. We ca
 fviz_pca_ind(pca_result)
 
 ```
+### Task c
 
-```{r, echo = FALSE, message=FALSE, warning=FALSE}
+Which individual features can matter the most in separating diseased from healthy?
+
+The previous plot showed how the dataset was separated. 
+Now I want to look at which features have high loadings for the first PC, that is, the largest coordinates.
+
+
+```{r echo = FALSE , warning = FALSE, message = FALSE}
 
 fviz_contrib(pca_result, "var", axes = 1, top=5)
 ```
+
+I take two features: V502 and V589. I plot the observations in the coordinate system defined by these two original features.
+
+```{r echo = FALSE , warning = FALSE, message = FALSE}
+genes$rownumber = 1:nrow(genes)
+genes <- genes %>%
+  mutate(healthy = ifelse(rownumber <= 20, FALSE, TRUE))
+ggplot(genes, aes(x = V502, y = V589, color=healthy)) +
+  geom_point()
+```
+
+I can see two groups: healthy patients are the ones with high values from the both features. Diseased patients are the ones with the lowest value from the both features.
+
+
+

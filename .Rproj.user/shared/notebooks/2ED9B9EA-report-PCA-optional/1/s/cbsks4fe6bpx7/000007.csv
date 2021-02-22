@@ -1,0 +1,5 @@
+"0","genes$rownumber = 1:nrow(genes)"
+"0","genes <- genes %>%"
+"0","  mutate(healthy = ifelse(rownumber <= 20, FALSE, TRUE))"
+"0","ggplot(genes, aes(x = V502, y = V589, color=healthy)) +"
+"0","  geom_point()"
